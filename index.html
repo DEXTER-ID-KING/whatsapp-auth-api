@@ -1,0 +1,839 @@
+<!-- public/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UDMODZ - WhatsApp Bot API</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #0a0a0f;
+            color: #ffffff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            min-height: 100vh;
+        }
+
+        .bg-animated {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #0a0a0f 0%, #1a0a2e 50%, #0a0a0f 100%);
+            z-index: -1;
+        }
+
+        .bg-animated::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(ellipse at center, rgba(100, 0, 255, 0.08) 0%, transparent 60%);
+            animation: pulse 6s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 0.5; }
+            50% { transform: scale(1.1); opacity: 1; }
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        /* Header */
+        .header {
+            text-align: center;
+            padding: 50px 20px 30px;
+        }
+
+        .logo {
+            font-size: 3rem;
+            font-weight: 900;
+            background: linear-gradient(135deg, #6400ff, #ffffff, #4400ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            letter-spacing: 5px;
+            margin-bottom: 10px;
+            text-shadow: none;
+        }
+
+        .subtitle {
+            color: rgba(255,255,255,0.5);
+            font-size: 0.9rem;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+        }
+
+        .badge {
+            display: inline-block;
+            background: linear-gradient(135deg, #6400ff33, #4400ff33);
+            border: 1px solid #6400ff55;
+            color: #a066ff;
+            padding: 4px 14px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            margin-top: 10px;
+            letter-spacing: 2px;
+        }
+
+        /* Cards */
+        .card {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(100, 0, 255, 0.2);
+            border-radius: 16px;
+            padding: 30px;
+            margin-bottom: 20px;
+            backdrop-filter: blur(10px);
+            transition: border-color 0.3s, box-shadow 0.3s;
+        }
+
+        .card:hover {
+            border-color: rgba(100, 0, 255, 0.5);
+            box-shadow: 0 0 30px rgba(100, 0, 255, 0.1);
+        }
+
+        .card-title {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: #a066ff;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .card-title::before {
+            content: '';
+            display: block;
+            width: 4px;
+            height: 20px;
+            background: linear-gradient(135deg, #6400ff, #a066ff);
+            border-radius: 2px;
+        }
+
+        /* Form Elements */
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 0.8rem;
+            color: rgba(255,255,255,0.6);
+            margin-bottom: 8px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+
+        .form-input {
+            width: 100%;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(100, 0, 255, 0.3);
+            border-radius: 10px;
+            padding: 12px 16px;
+            color: #ffffff;
+            font-size: 0.95rem;
+            outline: none;
+            transition: border-color 0.3s, box-shadow 0.3s;
+        }
+
+        .form-input:focus {
+            border-color: #6400ff;
+            box-shadow: 0 0 15px rgba(100, 0, 255, 0.2);
+        }
+
+        .form-input::placeholder {
+            color: rgba(255,255,255,0.25);
+        }
+
+        /* Buttons */
+        .btn {
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: 10px;
+            font-size: 0.95rem;
+            font-weight: 700;
+            cursor: pointer;
+            letter-spacing: 1px;
+            transition: all 0.3s;
+            margin-top: 5px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #6400ff, #4400cc);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #7722ff, #5500ee);
+            box-shadow: 0 5px 25px rgba(100, 0, 255, 0.4);
+            transform: translateY(-2px);
+        }
+
+        .btn-primary:active {
+            transform: translateY(0);
+        }
+
+        .btn-danger {
+            background: linear-gradient(135deg, #ff003344, #cc002244);
+            color: #ff6680;
+            border: 1px solid #ff003344;
+        }
+
+        .btn-danger:hover {
+            background: linear-gradient(135deg, #ff0033, #cc0022);
+            color: white;
+            box-shadow: 0 5px 25px rgba(255, 0, 51, 0.3);
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #00cc6644, #009944);
+            color: #44ff99;
+            border: 1px solid #00cc6644;
+        }
+
+        .btn-success:hover {
+            background: linear-gradient(135deg, #00cc66, #009944);
+            color: white;
+            box-shadow: 0 5px 25px rgba(0, 204, 102, 0.3);
+        }
+
+        /* Result Box */
+        .result-box {
+            background: rgba(0,0,0,0.4);
+            border: 1px solid rgba(100, 0, 255, 0.2);
+            border-radius: 12px;
+            padding: 20px;
+            margin-top: 16px;
+            display: none;
+            position: relative;
+        }
+
+        .result-box.show {
+            display: block;
+        }
+
+        .result-box.success {
+            border-color: rgba(0, 204, 102, 0.4);
+            background: rgba(0, 204, 102, 0.05);
+        }
+
+        .result-box.error {
+            border-color: rgba(255, 0, 51, 0.4);
+            background: rgba(255, 0, 51, 0.05);
+        }
+
+        /* OTP Display */
+        .otp-display {
+            text-align: center;
+            padding: 20px;
+        }
+
+        .otp-label {
+            font-size: 0.8rem;
+            color: rgba(255,255,255,0.5);
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            margin-bottom: 12px;
+        }
+
+        .otp-code {
+            font-size: 3rem;
+            font-weight: 900;
+            letter-spacing: 12px;
+            background: linear-gradient(135deg, #6400ff, #a066ff, #ffffff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            padding: 10px 0;
+        }
+
+        .copy-btn {
+            background: rgba(100, 0, 255, 0.2);
+            border: 1px solid rgba(100, 0, 255, 0.4);
+            color: #a066ff;
+            padding: 8px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            margin-top: 12px;
+            transition: all 0.3s;
+        }
+
+        .copy-btn:hover {
+            background: rgba(100, 0, 255, 0.4);
+            color: white;
+        }
+
+        /* Session ID Display */
+        .session-display {
+            padding: 15px;
+        }
+
+        .session-id-box {
+            background: rgba(0,0,0,0.5);
+            border: 1px solid rgba(100, 0, 255, 0.3);
+            border-radius: 8px;
+            padding: 12px 16px;
+            font-family: monospace;
+            font-size: 0.9rem;
+            color: #a066ff;
+            word-break: break-all;
+            margin: 8px 0;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .session-id-box:hover {
+            border-color: #6400ff;
+            background: rgba(100, 0, 255, 0.1);
+        }
+
+        .session-link {
+            color: #6699ff;
+            font-size: 0.8rem;
+            text-decoration: none;
+            display: block;
+            margin-top: 8px;
+        }
+
+        .session-link:hover {
+            color: #88aaff;
+            text-decoration: underline;
+        }
+
+        /* Status Indicator */
+        .status-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+
+        .status-dot.online { background: #00cc66; box-shadow: 0 0 8px #00cc66; }
+        .status-dot.offline { background: #ff3355; }
+        .status-dot.connecting { background: #ffaa00; animation: blink 1s infinite; }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        /* Bot List */
+        .bot-item {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(100, 0, 255, 0.15);
+            border-radius: 10px;
+            padding: 14px 18px;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .bot-info {
+            flex: 1;
+        }
+
+        .bot-number {
+            font-weight: 700;
+            font-size: 1rem;
+            color: #e0d0ff;
+        }
+
+        .bot-meta {
+            font-size: 0.75rem;
+            color: rgba(255,255,255,0.4);
+            margin-top: 4px;
+        }
+
+        .bot-session {
+            font-family: monospace;
+            font-size: 0.75rem;
+            color: #a066ff;
+            background: rgba(100,0,255,0.1);
+            padding: 3px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        /* Loading Spinner */
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            vertical-align: middle;
+            margin-right: 8px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 25px;
+            background: rgba(255,255,255,0.03);
+            padding: 5px;
+            border-radius: 12px;
+            border: 1px solid rgba(100,0,255,0.15);
+        }
+
+        .tab {
+            flex: 1;
+            padding: 10px;
+            background: transparent;
+            border: none;
+            color: rgba(255,255,255,0.4);
+            cursor: pointer;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            transition: all 0.3s;
+            letter-spacing: 0.5px;
+        }
+
+        .tab.active {
+            background: linear-gradient(135deg, #6400ff, #4400cc);
+            color: white;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            padding: 30px;
+            color: rgba(255,255,255,0.2);
+            font-size: 0.8rem;
+            letter-spacing: 2px;
+        }
+
+        /* Divider */
+        .divider {
+            height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(100,0,255,0.3), transparent);
+            margin: 20px 0;
+        }
+
+        /* Notification */
+        .notification {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(100,0,255,0.9);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 10px;
+            font-size: 0.85rem;
+            z-index: 1000;
+            transform: translateX(200px);
+            opacity: 0;
+            transition: all 0.3s;
+        }
+
+        .notification.show {
+            transform: translateX(0);
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-animated"></div>
+
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div class="logo">UDMODZ</div>
+            <div class="subtitle">WhatsApp Bot API System</div>
+            <div class="badge">FREE API • DONT SELL</div>
+        </div>
+
+        <!-- Tabs -->
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('pair')">🔗 Pair Bot</button>
+            <button class="tab" onclick="switchTab('session')">🔑 Session</button>
+            <button class="tab" onclick="switchTab('send')">💬 Send Msg</button>
+            <button class="tab" onclick="switchTab('manage')">⚙️ Manage</button>
+        </div>
+
+        <!-- Pair Tab -->
+        <div id="tab-pair" class="tab-content active">
+            <div class="card">
+                <div class="card-title">Pair New Bot</div>
+                <div class="form-group">
+                    <label class="form-label">Phone Number (with country code)</label>
+                    <input type="text" id="pair-number" class="form-input" placeholder="94769615736">
+                </div>
+                <button class="btn btn-primary" onclick="pairBot()">
+                    🔗 Get Pairing Code
+                </button>
+
+                <div id="pair-result" class="result-box">
+                    <div id="pair-content"></div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">How It Works</div>
+                <div style="color: rgba(255,255,255,0.6); font-size: 0.88rem; line-height: 1.8;">
+                    <p>1️⃣ Enter your phone number with country code</p>
+                    <p>2️⃣ Click "Get Pairing Code" button</p>
+                    <p>3️⃣ Open WhatsApp → Linked Devices → Link a Device</p>
+                    <p>4️⃣ Enter the pairing code shown</p>
+                    <p>5️⃣ Session ID will be sent to your WhatsApp automatically ✅</p>
+                    <p>6️⃣ Use that Session ID in your bot config</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Session Tab -->
+        <div id="tab-session" class="tab-content">
+            <div class="card">
+                <div class="card-title">Get Session ID</div>
+                <div class="form-group">
+                    <label class="form-label">Phone Number</label>
+                    <input type="text" id="session-number" class="form-input" placeholder="94769615736">
+                </div>
+                <button class="btn btn-primary" onclick="getSession()">
+                    🔑 Get Session ID
+                </button>
+
+                <div id="session-result" class="result-box">
+                    <div id="session-content"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Send Message Tab -->
+        <div id="tab-send" class="tab-content">
+            <div class="card">
+                <div class="card-title">Send Message</div>
+                <div class="form-group">
+                    <label class="form-label">Bot Number</label>
+                    <input type="text" id="send-bot" class="form-input" placeholder="94769615736">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Receiver Number</label>
+                    <input type="text" id="send-receiver" class="form-input" placeholder="94771234567">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Message</label>
+                    <input type="text" id="send-msg" class="form-input" placeholder="Hello from UDMODZ Bot!">
+                </div>
+                <button class="btn btn-primary" onclick="sendMessage()">
+                    💬 Send Message
+                </button>
+
+                <div id="send-result" class="result-box">
+                    <div id="send-content"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Manage Tab -->
+        <div id="tab-manage" class="tab-content">
+            <div class="card">
+                <div class="card-title">Bot Status</div>
+                <button class="btn btn-success" onclick="loadHealth()" style="margin-bottom: 16px;">
+                    🔄 Refresh Status
+                </button>
+                <div id="health-list">
+                    <div style="text-align: center; color: rgba(255,255,255,0.3); padding: 20px;">
+                        Click refresh to load bot status
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">Delete Bot</div>
+                <div class="form-group">
+                    <label class="form-label">Phone Number</label>
+                    <input type="text" id="delete-number" class="form-input" placeholder="94769615736">
+                </div>
+                <button class="btn btn-danger" onclick="deleteBot()">
+                    🗑️ Delete Bot
+                </button>
+                <div id="delete-result" class="result-box">
+                    <div id="delete-content"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            UDMODZ • DONT SELL • A FREE API • ITz UDMODZ
+        </div>
+    </div>
+
+    <!-- Notification -->
+    <div id="notification" class="notification"></div>
+
+    <script>
+        function switchTab(tab) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            document.getElementById('tab-' + tab).classList.add('active');
+            event.target.classList.add('active');
+        }
+
+        function showNotification(msg) {
+            const n = document.getElementById('notification');
+            n.textContent = msg;
+            n.classList.add('show');
+            setTimeout(() => n.classList.remove('show'), 3000);
+        }
+
+        function copyText(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                showNotification('✅ Copied to clipboard!');
+            });
+        }
+
+        async function pairBot() {
+            const number = document.getElementById('pair-number').value.trim();
+            if (!number) return showNotification('❌ Enter phone number!');
+
+            const btn = event.target;
+            btn.innerHTML = '<span class="spinner"></span>Getting code...';
+            btn.disabled = true;
+
+            const resultBox = document.getElementById('pair-result');
+            const content = document.getElementById('pair-content');
+
+            try {
+                const res = await fetch(`/pair?number=${number}`);
+                const data = await res.json();
+
+                resultBox.classList.add('show');
+
+                if (data.status === 'success') {
+                    resultBox.className = 'result-box show success';
+                    content.innerHTML = `
+                        <div class="otp-display">
+                            <div class="otp-label">🔑 PAIRING CODE</div>
+                            <div class="otp-code">${data.code}</div>
+                            <button class="copy-btn" onclick="copyText('${data.code}')">📋 Copy Code</button>
+                            <div style="margin-top: 16px; font-size: 0.8rem; color: rgba(255,255,255,0.5);">
+                                ✅ After pairing, Session ID will be sent to your WhatsApp automatically!
+                            </div>
+                        </div>
+                    `;
+                } else if (data.status === 'already_authenticated') {
+                    resultBox.className = 'result-box show success';
+                    content.innerHTML = `
+                        <div class="session-display">
+                            <div style="color: #44ff99; margin-bottom: 12px;">✅ Already Paired!</div>
+                            <div style="font-size: 0.85rem; color: rgba(255,255,255,0.6);">Session ID:</div>
+                            <div class="session-id-box" onclick="copyText('${data.sessionId}')">
+                                ${data.sessionId}
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    resultBox.className = 'result-box show error';
+                    content.innerHTML = `<div style="color: #ff6680;">❌ ${data.error}</div>`;
+                }
+            } catch (e) {
+                resultBox.className = 'result-box show error';
+                resultBox.classList.add('show');
+                content.innerHTML = `<div style="color: #ff6680;">❌ Connection error: ${e.message}</div>`;
+            }
+
+            btn.innerHTML = '🔗 Get Pairing Code';
+            btn.disabled = false;
+        }
+
+        async function getSession() {
+            const number = document.getElementById('session-number').value.trim();
+            if (!number) return showNotification('❌ Enter phone number!');
+
+            const btn = event.target;
+            btn.innerHTML = '<span class="spinner"></span>Loading...';
+            btn.disabled = true;
+
+            const resultBox = document.getElementById('session-result');
+            const content = document.getElementById('session-content');
+
+            try {
+                const res = await fetch(`/session?number=${number}`);
+                const data = await res.json();
+
+                resultBox.classList.add('show');
+
+                if (data.status === 'success') {
+                    resultBox.className = 'result-box show success';
+                    content.innerHTML = `
+                        <div class="session-display">
+                            <div style="color: #44ff99; font-weight: 700; margin-bottom: 14px;">✅ Session Found!</div>
+                            
+                            <div style="font-size: 0.8rem; color: rgba(255,255,255,0.5); margin-bottom: 6px;">SESSION ID (Click to Copy):</div>
+                            <div class="session-id-box" onclick="copyText('${data.sessionId}')">
+                                ${data.sessionId}
+                            </div>
+                            
+                            <a href="${data.rawUrl}" target="_blank" class="session-link">🔗 Raw URL: ${data.rawUrl}</a>
+                            <a href="${data.pasteUrl}" target="_blank" class="session-link">📄 Pastebin: ${data.pasteUrl}</a>
+                            
+                            <div style="margin-top: 14px; padding: 12px; background: rgba(0,0,0,0.3); border-radius: 8px; font-size: 0.8rem; color: rgba(255,255,255,0.5);">
+                                💡 Use this in your bot config:<br>
+                                <span style="color: #a066ff; font-family: monospace;">SESSION_ID=${data.sessionId}</span>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    resultBox.className = 'result-box show error';
+                    content.innerHTML = `<div style="color: #ff6680;">❌ ${data.error}</div>`;
+                }
+            } catch (e) {
+                resultBox.className = 'result-box show error';
+                content.innerHTML = `<div style="color: #ff6680;">❌ Error: ${e.message}</div>`;
+            }
+
+            btn.innerHTML = '🔑 Get Session ID';
+            btn.disabled = false;
+        }
+
+        async function sendMessage() {
+            const botNumber = document.getElementById('send-bot').value.trim();
+            const receiver = document.getElementById('send-receiver').value.trim();
+            const msg = document.getElementById('send-msg').value.trim();
+
+            if (!botNumber || !receiver || !msg) return showNotification('❌ Fill all fields!');
+
+            const btn = event.target;
+            btn.innerHTML = '<span class="spinner"></span>Sending...';
+            btn.disabled = true;
+
+            const resultBox = document.getElementById('send-result');
+            const content = document.getElementById('send-content');
+
+            try {
+                const res = await fetch(`/send?botNumber=${botNumber}&receiver=${receiver}&text=${encodeURIComponent(msg)}`);
+                const data = await res.json();
+
+                resultBox.classList.add('show');
+
+                if (data.status === 'success') {
+                    resultBox.className = 'result-box show success';
+                    content.innerHTML = `<div style="color: #44ff99;">✅ Message sent successfully!</div>`;
+                } else {
+                    resultBox.className = 'result-box show error';
+                    content.innerHTML = `<div style="color: #ff6680;">❌ ${data.error}</div>`;
+                }
+            } catch (e) {
+                resultBox.className = 'result-box show error';
+                content.innerHTML = `<div style="color: #ff6680;">❌ Error: ${e.message}</div>`;
+            }
+
+            btn.innerHTML = '💬 Send Message';
+            btn.disabled = false;
+        }
+
+        async function loadHealth() {
+            const list = document.getElementById('health-list');
+            list.innerHTML = '<div style="text-align:center; color: rgba(255,255,255,0.4); padding: 20px;"><span class="spinner"></span> Loading...</div>';
+
+            try {
+                const res = await fetch('/health');
+                const data = await res.json();
+
+                if (data.bots.length === 0) {
+                    list.innerHTML = '<div style="text-align:center; color: rgba(255,255,255,0.3); padding: 20px;">No bots found</div>';
+                    return;
+                }
+
+                list.innerHTML = data.bots.map(bot => `
+                    <div class="bot-item">
+                        <div class="bot-info">
+                            <div class="bot-number">
+                                <span class="status-dot ${bot.status === 'open' ? 'online' : bot.status === 'connecting' ? 'connecting' : 'offline'}"></span>
+                                +${bot.number}
+                            </div>
+                            <div class="bot-meta">
+                                Status: ${bot.status} • Last: ${bot.lastUpdate}
+                            </div>
+                            ${bot.sessionId !== 'N/A' ? `
+                            <div style="margin-top: 6px;">
+                                <span class="bot-session" onclick="copyText('${bot.sessionId}')">
+                                    📋 ${bot.sessionId}
+                                </span>
+                                ${bot.rawUrl !== 'N/A' ? `<a href="${bot.rawUrl}" target="_blank" style="margin-left: 8px; font-size: 0.75rem; color: #6699ff;">Raw ↗</a>` : ''}
+                            </div>` : ''}
+                        </div>
+                    </div>
+                `).join('');
+            } catch (e) {
+                list.innerHTML = `<div style="color: #ff6680; text-align: center;">❌ Error: ${e.message}</div>`;
+            }
+        }
+
+        async function deleteBot() {
+            const number = document.getElementById('delete-number').value.trim();
+            if (!number) return showNotification('❌ Enter phone number!');
+
+            if (!confirm(`Delete bot ${number}? This cannot be undone.`)) return;
+
+            const btn = event.target;
+            btn.innerHTML = '<span class="spinner"></span>Deleting...';
+            btn.disabled = true;
+
+            const resultBox = document.getElementById('delete-result');
+            const content = document.getElementById('delete-content');
+
+            try {
+                const res = await fetch(`/manage?number=${number}&action=delete`);
+                const data = await res.json();
+
+                resultBox.classList.add('show');
+
+                if (data.status === 'success') {
+                    resultBox.className = 'result-box show success';
+                    content.innerHTML = `<div style="color: #44ff99;">✅ ${data.message}</div>`;
+                } else {
+                    resultBox.className = 'result-box show error';
+                    content.innerHTML = `<div style="color: #ff6680;">❌ ${data.error}</div>`;
+                }
+            } catch (e) {
+                resultBox.className = 'result-box show error';
+                content.innerHTML = `<div style="color: #ff6680;">❌ Error: ${e.message}</div>`;
+            }
+
+            btn.innerHTML = '🗑️ Delete Bot';
+            btn.disabled = false;
+        }
+
+        // Auto load health on page load
+        window.onload = () => {
+            loadHealth();
+        };
+    </script>
+</body>
+</html>
