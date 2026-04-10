@@ -30,14 +30,15 @@ const {
     DisconnectReason,
     generateWAMessageFromContent
 } = require('noname089');
-const { Curve } = require('noname089/lib/Utils');
 const P = require('pino');
-const { Octokit } = require('@octokit/rest');
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
+const axios = require('axios');
 const udmodzportal = express();
 const port = process.env.PORT || 8080;
 const gradient = require("gradient-string");
+
 const title1 = "┈█┈┈┈┈██┈▓█████▄┈┈┈███▄┈▄███▓┈▒█████┈┈┈▓█████▄┈┈▒███████▒";
 const title2 = "┈██┈┈▓██▒▒██▀┈██▌┈▓██▒▀█▀┈██▒▒██▒┈┈██▒┈▒██▀┈██▌┈▒┈▒┈▒┈▄▀░";
 const title3 = "▓██┈┈▒██░░██┈┈┈█▌┈▓██┈┈┈┈▓██░▒██░┈┈██▒┈░██┈┈┈█▌┈░┈▒┈▄▀▒░┈";
@@ -50,6 +51,7 @@ const title9 = "┈░░░┈░┈░┈┈░┈░┈┈░┈┈░┈┈�
 const title10 = "┈░░░┈░┈░┈┈░┈░┈┈░┈┈░┈┈┈┈┈┈░┈┈┈░┈░┈░┈▒┈┈┈┈░┈░┈┈░┈┈░┈░┈░┈░┈░";
 const title11 = "┈┈┈░┈┈┈┈┈┈┈┈░┈┈┈┈┈┈┈┈┈┈┈┈░┈┈┈┈┈┈┈░┈░┈┈┈┈┈┈░┈┈┈┈┈┈┈░┈░┈┈┈┈";
 const title12 = "┈┈┈┈┈┈┈┈┈┈░┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈░┈┈┈┈┈┈┈░┈┈┈┈┈┈┈┈";
+
 console.log('');
 console.log('');
 console.log('');
@@ -74,6 +76,7 @@ console.log(gradient(["#ff0000ff", "#FFFFFF", "#2f00ffff"])('ITz UDMODZ'));
 console.log('');
 console.log('');
 console.log('');
+
 const fs = require('fs');
 if (fs.existsSync('config.env')) {
     require('dotenv').config({ path: './config.env' });
@@ -81,64 +84,133 @@ if (fs.existsSync('config.env')) {
     require('dotenv').config();
 }
 
+// ============================================
+// PASTEBIN CONFIG
+// ============================================
+const PASTEBIN_API_KEY = process.env.PASTEBIN_API_KEY || '';
+const PASTEBIN_USER_KEY = process.env.PASTEBIN_USER_KEY || '';
 
-// git credentials
+// ============================================
+// PASTEBIN FUNCTIONS
+// ============================================
+async function uploadToPastebin(content, title) {
+    try {
+        const params = new URLSearchParams();
+        params.append('api_dev_key', PASTEBIN_API_KEY);
+        params.append('api_option', 'paste');
+        params.append('api_paste_code', content);
+        params.append('api_paste_name', title || 'UDMODZ Session');
+        params.append('api_paste_private', '1');
+        params.append('api_paste_expire_date', 'N');
 
+        if (PASTEBIN_USER_KEY) {
+            params.append('api_user_key', PASTEBIN_USER_KEY);
+        }
 
-const config = {
-    GITHUB_REPO_URL: process.env.GITHUB_REPO_URL || "Your github url",
-    GITHUB_SECRET_KEY: process.env.GITHUB_SECRET_KEY || "your github token",
-};
+        const response = await axios.post('https://pastebin.com/api/api_post.php', params, {
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+        });
+
+        if (response.data.startsWith('https://pastebin.com/')) {
+            const pasteId = response.data.split('/').pop().trim();
+            const rawUrl = `https://pastebin.com/raw/${pasteId}`;
+            console.log(`[PASTEBIN] Session uploaded: ${rawUrl}`);
+            return { url: response.data.trim(), rawUrl, pasteId };
+        } else {
+            throw new Error('Pastebin error: ' + response.data);
+        }
+    } catch (err) {
+        console.error('[PASTEBIN ERR]', err.message);
+        throw err;
+    }
+}
+
+async function loadFromPastebin(pasteId) {
+    try {
+        const rawUrl = `https://pastebin.com/raw/${pasteId}`;
+        const response = await axios.get(rawUrl, {
+            timeout: 15000,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+            }
+        });
+
+        let data = response.data;
+        if (typeof data === 'string') {
+            data = JSON.parse(data, BufferJSON.reviver);
+        }
+        return data;
+    } catch (err) {
+        console.error('[PASTEBIN LOAD ERR]', err.message);
+        return null;
+    }
+}
+
+// ============================================
+// SESSION FILE MANAGEMENT (local pastebin id store)
+// ============================================
+const SESSION_MAP_FILE = path.join(__dirname, 'session_map.json');
+
+function loadSessionMap() {
+    try {
+        if (fs.existsSync(SESSION_MAP_FILE)) {
+            return JSON.parse(fs.readFileSync(SESSION_MAP_FILE, 'utf-8'));
+        }
+    } catch (e) {}
+    return {};
+}
+
+function saveSessionMap(map) {
+    try {
+        fs.writeFileSync(SESSION_MAP_FILE, JSON.stringify(map, null, 2));
+    } catch (e) {}
+}
+
+function getSessionPasteId(sessionId) {
+    const map = loadSessionMap();
+    return map[sessionId] || null;
+}
+
+function setSessionPasteId(sessionId, pasteId) {
+    const map = loadSessionMap();
+    map[sessionId] = pasteId;
+    saveSessionMap(map);
+}
+
+function removeSessionPasteId(sessionId) {
+    const map = loadSessionMap();
+    delete map[sessionId];
+    saveSessionMap(map);
+}
+
+// ============================================
 
 udmodzportal.use(cors());
 udmodzportal.use(express.json());
+udmodzportal.use(express.static(path.join(__dirname, 'public')));
 
-
-const github = new Octokit({ auth: config.GITHUB_SECRET_KEY });
-const [owner, repo] = config.GITHUB_REPO_URL.split('/').slice(-2);
-
+const connections = new Map();
 const saveud0 = new Map();
 
-async function saveudgit(sessionId, state) {
+async function saveudpastebin(sessionId, state) {
     if (!saveud0.has(sessionId)) {
         saveud0.set(sessionId, Promise.resolve());
     }
 
     const currentChain = saveud0.get(sessionId);
     const nextLink = currentChain.then(async () => {
-        let retry = 0;
-        const maxRetries = 3;
-        while (retry < maxRetries) {
-            try {
-                const filePath = `sessions/${sessionId}.json`;
-                const content = Buffer.from(JSON.stringify(state, BufferJSON.replacer, 2)).toString('base64');
+        try {
+            const content = JSON.stringify(state, BufferJSON.replacer, 2);
+            const existingPasteId = getSessionPasteId(sessionId);
 
-                let sha = null;
-                try {
-                    const { data: file } = await github.repos.getContent({ owner, repo, path: filePath });
-                    if (!Array.isArray(file)) sha = file.sha;
-                } catch (err) { }
+            const result = await uploadToPastebin(content, `UDMODZ-${sessionId}`);
+            setSessionPasteId(sessionId, result.pasteId);
 
-                await github.repos.createOrUpdateFileContents({
-                    owner,
-                    repo,
-                    path: filePath,
-                    message: sha ? `Update session ${sessionId}` : `Create session ${sessionId}`,
-                    content,
-                    sha: sha || undefined
-                });
-                console.log(`[GIT] Session ${sessionId} synced successfully`);
-                break;
-            } catch (err) {
-                if (err.status === 409 || err.message.includes('sha')) {
-                    retry++;
-                    console.warn(`[GIT] Race condition in session ${sessionId}, retrying (${retry}/${maxRetries})...`);
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                } else {
-                    console.error('[GIT ERR]', err.message);
-                    break;
-                }
-            }
+            console.log(`[PASTEBIN] Session ${sessionId} saved. Paste ID: ${result.pasteId}`);
+            console.log(`[PASTEBIN] Raw URL: ${result.rawUrl}`);
+
+        } catch (err) {
+            console.error('[PASTEBIN SAVE ERR]', err.message);
         }
     });
 
@@ -146,38 +218,20 @@ async function saveudgit(sessionId, state) {
     return nextLink;
 }
 
-async function loadFromGitHub(sessionId) {
-    try {
-        const filePath = `sessions/${sessionId}.json`;
-        const { data: file } = await github.repos.getContent({ owner, repo, path: filePath });
-        const content = Buffer.from(file.content, 'base64').toString('utf-8');
-        return JSON.parse(content, BufferJSON.reviver);
-    } catch (err) {
-        return null;
-    }
+async function loadSessionFromPastebin(sessionId) {
+    const pasteId = getSessionPasteId(sessionId);
+    if (!pasteId) return null;
+    return await loadFromPastebin(pasteId);
 }
 
-async function deleteFromGitHub(sessionId) {
-    try {
-        const filePath = `sessions/${sessionId}.json`;
-        const { data: file } = await github.repos.getContent({ owner, repo, path: filePath });
-        if (!Array.isArray(file)) {
-            await github.repos.deleteFile({
-                owner,
-                repo,
-                path: filePath,
-                message: `Remove session ${sessionId}`,
-                sha: file.sha
-            });
-        }
-    } catch (err) { }
+async function deleteSessionFromPastebin(sessionId) {
+    removeSessionPasteId(sessionId);
+    console.log(`[PASTEBIN] Session ${sessionId} removed from local map`);
 }
-
-const connections = new Map();
 
 async function connectUDmodzBot(phoneNumber) {
     const sessionId = `session_${phoneNumber}`;
-    let sessionData = await loadFromGitHub(sessionId);
+    let sessionData = await loadSessionFromPastebin(sessionId);
 
     let creds = sessionData?.creds || initAuthCreds();
     let keys = sessionData?.keys || {};
@@ -186,7 +240,7 @@ async function connectUDmodzBot(phoneNumber) {
     const scheduleSave = () => {
         if (saveTimer) clearTimeout(saveTimer);
         saveTimer = setTimeout(() => {
-            saveudgit(sessionId, { creds, keys }).catch(() => { });
+            saveudpastebin(sessionId, { creds, keys }).catch(() => {});
         }, 5000);
     };
 
@@ -210,7 +264,7 @@ async function connectUDmodzBot(phoneNumber) {
     const version = (typeof fetchLatestVersion === 'function')
         ? (await fetchLatestVersion().catch(() => ({ version: [2, 3100, 1015901307] }))).version
         : [2, 3100, 1015901307];
-    let pairingRequested = false;
+
     async function connect() {
         const udmodzConnect = makeWASocket({
             logger: P({ level: "silent" }),
@@ -228,7 +282,12 @@ async function connectUDmodzBot(phoneNumber) {
             browser: ['Mac OS', 'Safari', '10.15.7']
         });
 
-        connections.set(phoneNumber, { udmodzConnect, status: 'connecting', lastUpdate: Date.now() });
+        connections.set(phoneNumber, {
+            udmodzConnect,
+            status: 'connecting',
+            lastUpdate: Date.now(),
+            sessionId
+        });
 
         udmodzConnect.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect } = update;
@@ -237,9 +296,77 @@ async function connectUDmodzBot(phoneNumber) {
                 connections.get(phoneNumber).status = connection;
                 connections.get(phoneNumber).lastUpdate = Date.now();
             }
+
+            // ============================================
+            // BOT CONNECT උනාම SESSION PASTEBIN UPLOAD + MSG
+            // ============================================
+            if (connection === 'open') {
+                console.log(`[BOT] ${phoneNumber} connected successfully!`);
+
+                try {
+                    // Save session to pastebin
+                    await saveudpastebin(sessionId, { creds, keys });
+
+                    // Get paste ID
+                    await delay(3000);
+                    const pasteId = getSessionPasteId(sessionId);
+
+                    if (pasteId) {
+                        const rawUrl = `https://pastebin.com/raw/${pasteId}`;
+                        const pasteUrl = `https://pastebin.com/${pasteId}`;
+
+                        const sessionMsg = `╔══════════════════════════════╗
+║     🤖 *UDMODZ BOT CONNECTED* 🤖     ║
+╚══════════════════════════════╝
+
+✅ *Bot Successfully Connected!*
+
+📱 *Number:* ${phoneNumber}
+🆔 *Session ID:* \`${pasteId}\`
+
+🔗 *Pastebin URL:*
+${pasteUrl}
+
+📋 *Raw Session URL:*
+${rawUrl}
+
+💾 *Copy Session ID:*
+\`\`\`${pasteId}\`\`\`
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📌 *How to use SESSION_ID:*
+Set SESSION_ID=${pasteId} in your config
+
+⚠️ *Keep this ID safe & private!*
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+> *Powered by UDMODZ* 💜`;
+
+                        // Send session info to bot's own number
+                        await udmodzConnect.sendMessage(
+                            phoneNumber + '@s.whatsapp.net',
+                            { text: sessionMsg }
+                        );
+
+                        console.log(`[SESSION] Sent to ${phoneNumber}: ${pasteId}`);
+                    }
+                } catch (e) {
+                    console.error('[SESSION MSG ERR]', e.message);
+                }
+            }
+
+            if (connection === 'close') {
+                const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+                if (shouldReconnect) {
+                    console.log(`[BOT] ${phoneNumber} reconnecting...`);
+                    await delay(5000);
+                    await connect();
+                }
+            }
         });
 
         udmodzConnect.ev.on('creds.update', () => {
+            creds = state.creds;
             scheduleSave();
         });
 
@@ -249,9 +376,16 @@ async function connectUDmodzBot(phoneNumber) {
     return await connect();
 }
 
+// ============================================
+// ROUTES
+// ============================================
 
+// Serve index.html
+udmodzportal.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
-
+// Pair route
 udmodzportal.get('/pair', async (req, res) => {
     const number = req.query.number?.replace(/[^0-9]/g, '');
     if (!number) return res.status(400).json({ error: 'Number required' });
@@ -262,16 +396,43 @@ udmodzportal.get('/pair', async (req, res) => {
 
         if (!udmodzConnect.authState.creds.registered) {
             const code = await udmodzConnect.requestPairingCode(number);
-            res.json({ status: 'success', code });
+            res.json({
+                status: 'success',
+                code,
+                message: 'After pairing, session ID will be sent to your WhatsApp'
+            });
         } else {
-            res.json({ status: 'already_authenticated', message: 'This bot is already paired to api.' });
+            const pasteId = getSessionPasteId(`session_${number}`);
+            res.json({
+                status: 'already_authenticated',
+                message: 'This bot is already paired.',
+                sessionId: pasteId || 'Check your WhatsApp for session ID'
+            });
         }
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
+// Get session ID route
+udmodzportal.get('/session', async (req, res) => {
+    const number = req.query.number?.replace(/[^0-9]/g, '');
+    if (!number) return res.status(400).json({ error: 'Number required' });
 
+    const pasteId = getSessionPasteId(`session_${number}`);
+    if (pasteId) {
+        res.json({
+            status: 'success',
+            sessionId: pasteId,
+            rawUrl: `https://pastebin.com/raw/${pasteId}`,
+            pasteUrl: `https://pastebin.com/${pasteId}`
+        });
+    } else {
+        res.status(404).json({ error: 'Session not found for this number' });
+    }
+});
+
+// Manage route (delete)
 udmodzportal.get('/manage', async (req, res) => {
     const { number, action } = req.query;
     const cleanNumber = number?.replace(/[^0-9]/g, '');
@@ -280,37 +441,35 @@ udmodzportal.get('/manage', async (req, res) => {
     if (action === 'delete') {
         const bot = connections.get(cleanNumber);
         if (bot) {
-            try { bot.udmodzConnect.logout(); } catch (e) { }
+            try { bot.udmodzConnect.logout(); } catch (e) {}
             connections.delete(cleanNumber);
         }
-        await deleteFromGitHub(`session_${cleanNumber}`);
+        await deleteSessionFromPastebin(`session_${cleanNumber}`);
         return res.json({ status: 'success', message: `Bot ${cleanNumber} deleted.` });
     }
 
     res.status(400).json({ error: 'Invalid action' });
 });
 
-
+// Send message route
 udmodzportal.get('/send', async (req, res) => {
-    const { text, msg, botNumber, receiver, otp } = req.query;
+    const { text, msg, botNumber, receiver } = req.query;
     const messageContent = text || msg;
     const cleanedbotud = botNumber?.replace(/[^0-9]/g, '');
     const cleanedreciud = receiver?.replace(/[^0-9]/g, '');
 
     if (!messageContent || !cleanedbotud || !cleanedreciud) {
-        return res.status(400).json({ error: 'text / msg, botNumber, and receiver arent given properly' });
+        return res.status(400).json({ error: 'text/msg, botNumber, and receiver required' });
     }
 
     const receiverJid = cleanedreciud + '@s.whatsapp.net';
-
     let bot = connections.get(cleanedbotud);
 
     if (!bot || bot.status !== 'open') {
-        const sessionId = `session_${cleanedbotud}`;
-        const sessionExists = await loadFromGitHub(sessionId);
+        const sessionExists = getSessionPasteId(`session_${cleanedbotud}`);
         if (sessionExists) {
             if (bot && bot.udmodzConnect) {
-                try { bot.udmodzConnect.end(undefined); } catch (e) { }
+                try { bot.udmodzConnect.end(undefined); } catch (e) {}
             }
             await connectUDmodzBot(cleanedbotud);
             let attempts = 0;
@@ -325,101 +484,74 @@ udmodzportal.get('/send', async (req, res) => {
 
     if (bot && (bot.status === 'open' || bot.status === 'connected')) {
         try {
-            if (otp) {
-                const interactive = generateWAMessageFromContent(receiverJid, {
-                    viewOnceMessage: {
-                        message: {
-                            messageContextInfo: {
-                                deviceListMetadata: {},
-                                deviceListMetadataVersion: 2
-                            },
-                            interactiveMessage: proto.Message.InteractiveMessage.create({
-                                header: { hasMediaAttachment: false },
-                                body: { text: messageContent },
-                                footer: { text: "Powered BY UDMODZ" },
-                                nativeFlowMessage: {
-                                    buttons: [
-                                        {
-                                            name: "cta_copy",
-                                            buttonParamsJson: JSON.stringify({
-                                                display_text: "📋 Copy OTP",
-                                                id: "copy_code",
-                                                copy_code: otp
-                                            })
-                                        }
-                                    ]
-                                }
-                            })
-                        }
-                    }
-                }, { userJid: bot.udmodzConnect.user.id });
-
-                await bot.udmodzConnect.relayMessage(receiverJid, interactive.message, {
-                    messageId: interactive.key.id
-                });
-            } else {
-                await bot.udmodzConnect.sendMessage(receiverJid, { text: messageContent });
-            }
+            await bot.udmodzConnect.sendMessage(receiverJid, { text: messageContent });
             res.json({ status: 'success', message: 'Message sent' });
         } catch (err) {
-            res.status(500).json({ error: 'Failed to send message:- ' + err.message });
+            res.status(500).json({ error: 'Failed to send message: ' + err.message });
         }
     } else {
-        res.status(404).json({ error: 'Bot is offline or not found. Wait for reconnection...' });
+        res.status(404).json({ error: 'Bot is offline or not found.' });
     }
 });
 
-
+// Health check route
 udmodzportal.get('/health', async (req, res) => {
     const list = [];
     connections.forEach((val, key) => {
+        const pasteId = getSessionPasteId(`session_${key}`);
         list.push({
             number: key,
             status: val.status,
-            lastUpdate: new Date(val.lastUpdate).toISOString()
+            lastUpdate: new Date(val.lastUpdate).toISOString(),
+            sessionId: pasteId || 'N/A',
+            rawUrl: pasteId ? `https://pastebin.com/raw/${pasteId}` : 'N/A'
         });
     });
 
-    try {
-        const { data: files } = await github.repos.getContent({ owner, repo, path: 'sessions' });
-        for (const file of files) {
-            const num = file.name.replace('session_', '').replace('.json', '');
-            if (!connections.has(num)) {
-                list.push({ number: num, status: 'offline', lastUpdate: 'N/A' });
-            }
+    const sessionMap = loadSessionMap();
+    for (const [sessionId, pasteId] of Object.entries(sessionMap)) {
+        const num = sessionId.replace('session_', '');
+        if (!connections.has(num)) {
+            list.push({
+                number: num,
+                status: 'offline',
+                lastUpdate: 'N/A',
+                sessionId: pasteId,
+                rawUrl: `https://pastebin.com/raw/${pasteId}`
+            });
         }
-    } catch (e) { }
+    }
 
     res.json({ status: 'ok', bots: list });
 });
 
-
-const isProduction = process.env.NODE_ENV === 'production' || process.env.VERCEL || process.env.CLEVER_CLOUD;
-
+// ============================================
+// INIT - Load existing sessions
+// ============================================
 async function init() {
-    console.log('Searching botz on GitHub');
-    try {
-        const { data: files } = await github.repos.getContent({ owner, repo, path: 'sessions' });
-        for (const file of files) {
-            if (file.name.endsWith('.json')) {
-                const num = file.name.replace('session_', '').replace('.json', '');
-                console.log(`Connecting to paired botz: ${num}`);
-                await connectUDmodzBot(num);
-            }
+    console.log('[INIT] Loading existing sessions...');
+    const sessionMap = loadSessionMap();
+
+    for (const [sessionId, pasteId] of Object.entries(sessionMap)) {
+        const num = sessionId.replace('session_', '');
+        console.log(`[INIT] Reconnecting: ${num} (Paste: ${pasteId})`);
+        try {
+            await connectUDmodzBot(num);
+            await delay(2000);
+        } catch (e) {
+            console.error(`[INIT ERR] ${num}:`, e.message);
         }
-    } catch (e) {
-        console.error('Fail loading sessions:-', e.message);
     }
 }
 
-if (isProduction) {
+const isProduction = process.env.NODE_ENV === 'production' || process.env.VERCEL || process.env.CLEVER_CLOUD;
 
+if (isProduction) {
     udmodzportal.listen(port, async () => {
-        console.log(`OTP API Server running on port ${port}`);
+        console.log(`[SERVER] Running on port ${port}`);
         await init();
     });
 } else {
-
     const https = require('https');
     const selfsigned = require('selfsigned');
     const attrs = [{ name: 'commonName', value: 'localhost' }];
@@ -431,11 +563,10 @@ if (isProduction) {
     }, udmodzportal);
 
     httpsServer.listen(port, async () => {
-        console.log(`OTP API Server running on port ${port}`);
-        console.log(`URL: https://localhost:${port}`);
+        console.log(`[SERVER] Running on port ${port}`);
+        console.log(`[SERVER] URL: https://localhost:${port}`);
         await init();
     });
 }
-
 
 module.exports = udmodzportal;
