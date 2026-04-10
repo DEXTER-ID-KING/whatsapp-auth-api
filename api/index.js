@@ -25,7 +25,6 @@ const {
     initAuthCreds,
     BufferJSON,
     Browsers,
-    makeCacheableSignalKeyStore,
     proto,
     DisconnectReason,
     generateWAMessageFromContent
@@ -37,6 +36,7 @@ const cors = require('cors');
 const path = require('path');
 const axios = require('axios');
 const fs = require('fs');
+const os = require('os');
 
 const udmodzportal = express();
 const port = process.env.PORT || 8080;
@@ -55,8 +55,6 @@ const title10 = "┈░░░┈░┈░┈┈░┈░┈┈░┈┈░┈┈
 const title11 = "┈┈┈░┈┈┈┈┈┈┈┈░┈┈┈┈┈┈┈┈┈┈┈┈░┈┈┈┈┈┈┈░┈░┈┈┈┈┈┈░┈┈┈┈┈┈┈░┈░┈┈┈┈";
 
 console.log('');
-console.log('');
-console.log('');
 console.log(gradient(["#4000ffff", "#FFFFFF", "#2f00ffff"])(title1));
 console.log(gradient(["#4000ffff", "#FFFFFF", "#2f00ffff"])(title2));
 console.log(gradient(["#4000ffff", "#FFFFFF", "#2f00ffff"])(title3));
@@ -69,14 +67,10 @@ console.log(gradient(["#4000ffff", "#FFFFFF", "#2f00ffff"])(title9));
 console.log(gradient(["#4000ffff", "#FFFFFF", "#2f00ffff"])(title10));
 console.log(gradient(["#4000ffff", "#FFFFFF", "#2f00ffff"])(title11));
 console.log('');
-console.log('');
-console.log('');
 console.log(gradient(["#ff0055ff", "#FFFFFF", "#2f00ffff"])('By UDMODZ'));
 console.log(gradient(["#ff0008ff", "#FFFFFF", "#2f00ffff"])('DONT SELL'));
 console.log(gradient(["#ff0026ff", "#FFFFFF", "#2f00ffff"])('A FREE API'));
 console.log(gradient(["#ff0000ff", "#FFFFFF", "#2f00ffff"])('ITz UDMODZ'));
-console.log('');
-console.log('');
 console.log('');
 
 if (fs.existsSync('config.env')) {
@@ -86,53 +80,91 @@ if (fs.existsSync('config.env')) {
 }
 
 // ============================================
-// PASTEBIN CONFIG - API KEY HARDCODED
+// WRITABLE TEMP DIR (Read-only filesystem fix)
+// ============================================
+const TEMP_DIR = process.env.TEMP_DIR || os.tmpdir();
+const SESSION_MAP_FILE = path.join(TEMP_DIR, 'udmodz_session_map.json');
+
+console.log('[SYSTEM] 📁 Temp dir:', TEMP_DIR);
+console.log('[SYSTEM] 📄 Session map:', SESSION_MAP_FILE);
+
+// ============================================
+// PASTEBIN CONFIG
 // ============================================
 const PASTEBIN_API_KEY = process.env.PASTEBIN_API_KEY || '0AD7HvdRLJpSZDyBCSgn4KCJKtyOy6dO';
 const PASTEBIN_USERNAME = process.env.PASTEBIN_USERNAME || '';
 const PASTEBIN_PASSWORD = process.env.PASTEBIN_PASSWORD || '';
 
 // ============================================
-// SESSION MAP - Local storage for paste IDs
+// IN-MEMORY SESSION MAP (Primary)
+// File-based map (Secondary - if writable)
 // ============================================
-const SESSION_MAP_FILE = path.join(__dirname, 'session_map.json');
+const inMemorySessionMap = new Map();
 
 function loadSessionMap() {
+    // First load from memory
+    if (inMemorySessionMap.size > 0) {
+        const obj = {};
+        inMemorySessionMap.forEach((v, k) => obj[k] = v);
+        return obj;
+    }
+
+    // Try file
     try {
         if (fs.existsSync(SESSION_MAP_FILE)) {
-            return JSON.parse(fs.readFileSync(SESSION_MAP_FILE, 'utf-8'));
+            const data = JSON.parse(fs.readFileSync(SESSION_MAP_FILE, 'utf-8'));
+            // Load into memory
+            Object.entries(data).forEach(([k, v]) => inMemorySessionMap.set(k, v));
+            return data;
         }
-    } catch (e) {}
+    } catch (e) {
+        console.log('[MAP] File read skipped:', e.message);
+    }
     return {};
 }
 
 function saveSessionMap(map) {
+    // Always save to memory first
+    Object.entries(map).forEach(([k, v]) => inMemorySessionMap.set(k, v));
+
+    // Try file (non-blocking)
     try {
         fs.writeFileSync(SESSION_MAP_FILE, JSON.stringify(map, null, 2));
     } catch (e) {
-        console.error('[MAP SAVE ERR]', e.message);
+        // Silently ignore read-only filesystem errors
+        if (!e.message.includes('EROFS') && !e.message.includes('read-only')) {
+            console.log('[MAP] File write skipped:', e.code);
+        }
     }
 }
 
 function getSessionPasteId(sessionId) {
+    // Check memory first
+    if (inMemorySessionMap.has(sessionId)) {
+        return inMemorySessionMap.get(sessionId);
+    }
+    // Check file
     const map = loadSessionMap();
     return map[sessionId] || null;
 }
 
 function setSessionPasteId(sessionId, pasteId) {
+    inMemorySessionMap.set(sessionId, pasteId);
     const map = loadSessionMap();
     map[sessionId] = pasteId;
     saveSessionMap(map);
+    console.log(`[MAP] ✅ Saved ${sessionId} = ${pasteId}`);
 }
 
 function removeSessionPasteId(sessionId) {
+    inMemorySessionMap.delete(sessionId);
     const map = loadSessionMap();
     delete map[sessionId];
     saveSessionMap(map);
 }
 
 // ============================================
-// PASTEBIN USER KEY (cache)
+// PASTEBIN USER KEY CACHE
 // ============================================
 let cachedUserKey = null;
 
@@ -149,17 +181,19 @@ async function getPastebinUserKey() {
         const response = await axios.post(
             'https://pastebin.com/api/api_login.php',
             params,
-            { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+            {
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                timeout: 15000
+            }
         );
 
         if (response.data && !response.data.startsWith('Bad')) {
             cachedUserKey = response.data.trim();
-            console.log('[PASTEBIN] User key obtained successfully');
+            console.log('[PASTEBIN] ✅ User key obtained');
             return cachedUserKey;
-        } else {
-            console.warn('[PASTEBIN] Login failed:', response.data);
-            return null;
         }
+        console.warn('[PASTEBIN] Login failed:', response.data);
+        return null;
     } catch (err) {
         console.error('[PASTEBIN LOGIN ERR]', err.message);
         return null;
@@ -172,7 +206,6 @@ async function getPastebinUserKey() {
 async function uploadToPastebin(content, title) {
     try {
         const userKey = await getPastebinUserKey();
-
         const params = new URLSearchParams();
         params.append('api_dev_key', PASTEBIN_API_KEY);
         params.append('api_option', 'paste');
@@ -180,12 +213,11 @@ async function uploadToPastebin(content, title) {
         params.append('api_paste_name', title || 'UDMODZ-Session');
         params.append('api_paste_expire_date', 'N');
 
-        // Private paste if user key available, unlisted if not
         if (userKey) {
             params.append('api_user_key', userKey);
-            params.append('api_paste_private', '2'); // Private
+            params.append('api_paste_private', '2');
         } else {
-            params.append('api_paste_private', '1'); // Unlisted
+            params.append('api_paste_private', '1');
         }
 
         const response = await axios.post(
@@ -201,16 +233,10 @@ async function uploadToPastebin(content, title) {
             const pasteUrl = response.data.trim();
             const pasteId = pasteUrl.split('/').pop();
             const rawUrl = `https://pastebin.com/raw/${pasteId}`;
-
-            console.log(`[PASTEBIN] ✅ Uploaded successfully!`);
-            console.log(`[PASTEBIN] 🔗 URL: ${pasteUrl}`);
-            console.log(`[PASTEBIN] 📋 Raw: ${rawUrl}`);
-            console.log(`[PASTEBIN] 🆔 ID: ${pasteId}`);
-
+            console.log(`[PASTEBIN] ✅ Uploaded! ID: ${pasteId}`);
             return { url: pasteUrl, rawUrl, pasteId };
-        } else {
-            throw new Error('Pastebin API error: ' + response.data);
         }
+        throw new Error('Pastebin error: ' + response.data);
     } catch (err) {
         console.error('[PASTEBIN UPLOAD ERR]', err.message);
         throw err;
@@ -218,13 +244,13 @@ async function uploadToPastebin(content, title) {
 }
 
 // ============================================
-// LOAD FROM PASTEBIN RAW
+// LOAD FROM PASTEBIN
 // ============================================
 async function loadFromPastebin(pasteId) {
     try {
         const userKey = await getPastebinUserKey();
 
-        // Try API raw fetch first (for private pastes)
+        // Try API (for private pastes)
         if (userKey) {
             try {
                 const params = new URLSearchParams();
@@ -247,24 +273,26 @@ async function loadFromPastebin(pasteId) {
                     if (typeof data === 'string') {
                         data = JSON.parse(data, BufferJSON.reviver);
                     }
+                    console.log(`[PASTEBIN] ✅ Loaded from API: ${pasteId}`);
                     return data;
                 }
-            } catch (e) {}
+            } catch (e) {
+                console.log('[PASTEBIN] API load failed, trying raw URL');
+            }
         }
 
-        // Fallback: public raw URL
+        // Fallback: raw URL
         const rawUrl = `https://pastebin.com/raw/${pasteId}`;
         const response = await axios.get(rawUrl, {
             timeout: 15000,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
-            }
+            headers: { 'User-Agent': 'Mozilla/5.0' }
         });
 
         let data = response.data;
         if (typeof data === 'string') {
             data = JSON.parse(data, BufferJSON.reviver);
         }
+        console.log(`[PASTEBIN] ✅ Loaded from raw: ${pasteId}`);
         return data;
 
     } catch (err) {
@@ -279,10 +307,7 @@ async function loadFromPastebin(pasteId) {
 async function deleteFromPastebin(pasteId) {
     try {
         const userKey = await getPastebinUserKey();
-        if (!userKey) {
-            console.warn('[PASTEBIN] No user key, cannot delete paste');
-            return false;
-        }
+        if (!userKey) return false;
 
         const params = new URLSearchParams();
         params.append('api_dev_key', PASTEBIN_API_KEY);
@@ -300,12 +325,10 @@ async function deleteFromPastebin(pasteId) {
         );
 
         if (response.data === 'Paste Removed') {
-            console.log(`[PASTEBIN] ✅ Paste ${pasteId} deleted`);
+            console.log(`[PASTEBIN] ✅ Deleted: ${pasteId}`);
             return true;
-        } else {
-            console.warn('[PASTEBIN] Delete response:', response.data);
-            return false;
         }
+        return false;
     } catch (err) {
         console.error('[PASTEBIN DELETE ERR]', err.message);
         return false;
@@ -313,82 +336,85 @@ async function deleteFromPastebin(pasteId) {
 }
 
 // ============================================
-// SETUP EXPRESS
+// EXPRESS SETUP
 // ============================================
 udmodzportal.use(cors());
 udmodzportal.use(express.json());
 udmodzportal.use(express.static(path.join(__dirname, 'public')));
 
 const connections = new Map();
-const saveud0 = new Map();
+const saveQueues = new Map();
+const pendingPairings = new Map();
 
 // ============================================
-// SAVE SESSION TO PASTEBIN (with queue)
+// SAVE SESSION QUEUE
 // ============================================
 async function saveudpastebin(sessionId, state) {
-    if (!saveud0.has(sessionId)) {
-        saveud0.set(sessionId, Promise.resolve());
+    if (!saveQueues.has(sessionId)) {
+        saveQueues.set(sessionId, Promise.resolve());
     }
 
-    const currentChain = saveud0.get(sessionId);
-    const nextLink = currentChain.then(async () => {
+    const chain = saveQueues.get(sessionId);
+    const next = chain.then(async () => {
         let retry = 0;
-        const maxRetries = 3;
-
-        while (retry < maxRetries) {
+        while (retry < 3) {
             try {
                 const content = JSON.stringify(state, BufferJSON.replacer, 2);
                 const result = await uploadToPastebin(content, `UDMODZ-${sessionId}`);
 
-                // Delete old paste if exists
-                const oldPasteId = getSessionPasteId(sessionId);
-                if (oldPasteId && oldPasteId !== result.pasteId) {
-                    deleteFromPastebin(oldPasteId).catch(() => {});
+                // Delete old paste
+                const oldId = getSessionPasteId(sessionId);
+                if (oldId && oldId !== result.pasteId) {
+                    deleteFromPastebin(oldId).catch(() => {});
                 }
 
                 setSessionPasteId(sessionId, result.pasteId);
-                console.log(`[SESSION] ✅ ${sessionId} saved - ID: ${result.pasteId}`);
                 return result;
-
             } catch (err) {
                 retry++;
-                console.warn(`[SESSION] Retry ${retry}/${maxRetries} for ${sessionId}`);
-                if (retry < maxRetries) {
-                    await new Promise(r => setTimeout(r, 3000 * retry));
-                } else {
-                    console.error('[SESSION SAVE ERR]', err.message);
-                }
+                if (retry < 3) await new Promise(r => setTimeout(r, 3000 * retry));
             }
         }
     });
 
-    saveud0.set(sessionId, nextLink);
-    return nextLink;
+    saveQueues.set(sessionId, next);
+    return next;
 }
 
 // ============================================
-// CONNECT BOT
+// MAIN BOT CONNECT FUNCTION
 // ============================================
-async function connectUDmodzBot(phoneNumber) {
+async function connectUDmodzBot(phoneNumber, isNewPairing = false) {
     const sessionId = `session_${phoneNumber}`;
 
-    // Load session from pastebin
-    let sessionData = null;
-    const pasteId = getSessionPasteId(sessionId);
-    if (pasteId) {
-        console.log(`[BOT] Loading session for ${phoneNumber} from paste: ${pasteId}`);
-        sessionData = await loadFromPastebin(pasteId);
+    // Load existing session
+    let creds = initAuthCreds();
+    let keys = {};
+
+    if (!isNewPairing) {
+        const pasteId = getSessionPasteId(sessionId);
+        if (pasteId) {
+            console.log(`[BOT] Loading session for ${phoneNumber} from: ${pasteId}`);
+            const sessionData = await loadFromPastebin(pasteId);
+            if (sessionData) {
+                creds = sessionData.creds || initAuthCreds();
+                keys = sessionData.keys || {};
+                console.log(`[BOT] ✅ Session loaded for ${phoneNumber}`);
+            }
+        }
     }
 
-    let creds = sessionData?.creds || initAuthCreds();
-    let keys = sessionData?.keys || {};
-
     let saveTimer = null;
+    let isConnected = false;
+    let sessionSaved = false;
+
     const scheduleSave = () => {
+        // Don't save if not properly connected yet
+        if (!isConnected && !sessionSaved) return;
         if (saveTimer) clearTimeout(saveTimer);
         saveTimer = setTimeout(async () => {
             await saveudpastebin(sessionId, { creds, keys }).catch(() => {});
-        }, 8000);
+        }, 10000);
     };
 
     const state = {
@@ -405,7 +431,8 @@ async function connectUDmodzBot(phoneNumber) {
                         keys[`${type}-${id}`] = data[type][id];
                     }
                 }
-                scheduleSave();
+                // Only schedule save after connected
+                if (isConnected) scheduleSave();
             }
         }
     };
@@ -415,141 +442,176 @@ async function connectUDmodzBot(phoneNumber) {
         : [2, 3100, 1015901307];
 
     async function connect() {
-        const udmodzConnect = makeWASocket({
+        const sock = makeWASocket({
             logger: P({ level: "silent" }),
             printQRInTerminal: false,
             auth: state,
             version,
             connectTimeoutMs: 60000,
             defaultQueryTimeoutMs: 0,
-            keepAliveIntervalMs: 10000,
+            keepAliveIntervalMs: 25000,
             emitOwnEvents: true,
             fireInitQueries: true,
             generateHighQualityLinkPreview: true,
             syncFullHistory: false,
             markOnlineOnConnect: true,
-            browser: ['Mac OS', 'Safari', '10.15.7']
+            browser: ['Ubuntu', 'Chrome', '20.0.04']
         });
 
         connections.set(phoneNumber, {
-            udmodzConnect,
+            sock,
             status: 'connecting',
             lastUpdate: Date.now(),
             sessionId,
             phoneNumber
         });
 
-        udmodzConnect.ev.on('connection.update', async (update) => {
-            const { connection, lastDisconnect } = update;
+        // ============================================
+        // CONNECTION UPDATE HANDLER
+        // ============================================
+        sock.ev.on('connection.update', async (update) => {
+            const { connection, lastDisconnect, qr } = update;
 
-            if (connection && connections.has(phoneNumber)) {
-                connections.get(phoneNumber).status = connection;
-                connections.get(phoneNumber).lastUpdate = Date.now();
+            console.log(`[BOT] ${phoneNumber} update:`, connection || 'partial');
+
+            if (connection) {
+                if (connections.has(phoneNumber)) {
+                    connections.get(phoneNumber).status = connection;
+                    connections.get(phoneNumber).lastUpdate = Date.now();
+                }
             }
 
             // ============================================
-            // CONNECTED - UPLOAD SESSION & SEND TO WA
+            // CONNECTED SUCCESSFULLY
             // ============================================
             if (connection === 'open') {
-                console.log(`[BOT] ✅ ${phoneNumber} connected!`);
+                isConnected = true;
+                console.log(`[BOT] ✅ ${phoneNumber} CONNECTED!`);
+
+                // Small delay to stabilize
+                await delay(3000);
 
                 try {
                     // Save session to pastebin
-                    console.log(`[BOT] 📤 Uploading session to Pastebin...`);
-                    const saveResult = await saveudpastebin(sessionId, { creds, keys });
+                    console.log(`[BOT] 📤 Saving session to Pastebin...`);
+                    const result = await saveudpastebin(sessionId, { creds, keys });
+                    sessionSaved = true;
 
-                    // Wait for upload to complete
-                    await delay(5000);
+                    // Wait for upload
+                    await delay(4000);
 
                     const currentPasteId = getSessionPasteId(sessionId);
+                    console.log(`[BOT] 🆔 Current Paste ID: ${currentPasteId}`);
 
                     if (currentPasteId) {
                         const rawUrl = `https://pastebin.com/raw/${currentPasteId}`;
                         const pasteUrl = `https://pastebin.com/${currentPasteId}`;
 
-                        // Format session message
                         const sessionMsg =
-`╔═══════════════════════════╗
+`╔══════════════════════════╗
 ║  🤖 *UDMODZ BOT CONNECTED* 🤖  ║
-╚═══════════════════════════╝
+╚══════════════════════════╝
 
 ✅ *Bot Connected Successfully!*
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━
 📱 *Number:* ${phoneNumber}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-🆔 *YOUR SESSION ID:*
+🆔 *SESSION ID:*
 \`\`\`${currentPasteId}\`\`\`
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📋 *Copy Session ID:*
-${currentPasteId}
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 *Raw URL:*
+${rawUrl}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🔗 *Pastebin URL:*
 ${pasteUrl}
 
-📄 *Raw Session URL:*
-${rawUrl}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━
-💾 *How to use:*
-Set in your bot config:
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+💾 *Bot Config:*
 SESSION_ID=${currentPasteId}
 
-⚠️ *Keep this ID PRIVATE & SAFE!*
-━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️ *Keep this ID PRIVATE!*
+━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-> *Powered by UDMODZ API* 💜
-> *DONT SELL • A FREE API*`;
+> *UDMODZ API* 💜 | *DON'T SELL*`;
 
-                        // Send to bot's own WhatsApp
+                        // Send to own number
                         try {
-                            await udmodzConnect.sendMessage(
+                            await sock.sendMessage(
                                 phoneNumber + '@s.whatsapp.net',
                                 { text: sessionMsg }
                             );
-                            console.log(`[BOT] ✅ Session ID sent to ${phoneNumber}`);
-                            console.log(`[BOT] 🆔 Session ID: ${currentPasteId}`);
+                            console.log(`[BOT] ✅ Session msg sent to ${phoneNumber}`);
                         } catch (msgErr) {
-                            console.error('[BOT] Message send error:', msgErr.message);
+                            console.error('[BOT] Msg send err:', msgErr.message);
                         }
-                    } else {
-                        console.error('[BOT] ❌ No paste ID found after upload');
-                    }
 
+                        // Store for API response
+                        if (pendingPairings.has(phoneNumber)) {
+                            pendingPairings.get(phoneNumber).pasteId = currentPasteId;
+                            pendingPairings.get(phoneNumber).rawUrl = rawUrl;
+                        }
+                    }
                 } catch (e) {
-                    console.error('[BOT] Session upload error:', e.message);
+                    console.error('[BOT] Post-connect error:', e.message);
                 }
             }
 
             // ============================================
-            // DISCONNECTED - RECONNECT
+            // DISCONNECTED
             // ============================================
             if (connection === 'close') {
                 const statusCode = lastDisconnect?.error?.output?.statusCode;
-                const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+                const reason = lastDisconnect?.error?.message || 'Unknown';
+                isConnected = false;
 
-                console.log(`[BOT] ${phoneNumber} disconnected. Code: ${statusCode}`);
+                console.log(`[BOT] ❌ ${phoneNumber} disconnected`);
+                console.log(`[BOT] Code: ${statusCode} | Reason: ${reason}`);
 
-                if (shouldReconnect) {
-                    console.log(`[BOT] 🔄 Reconnecting ${phoneNumber}...`);
-                    await delay(5000);
-                    await connect().catch(console.error);
+                if (saveTimer) clearTimeout(saveTimer);
+
+                // 401 = Logged out, 440 = Replaced, 428 = Connection closed
+                if (statusCode === DisconnectReason.loggedOut || statusCode === 401) {
+                    console.log(`[BOT] 🚫 ${phoneNumber} - Permanent logout`);
+                    connections.delete(phoneNumber);
+                    return;
+                }
+
+                // Reconnect for other errors
+                const shouldReconnect = [
+                    undefined,
+                    408, // Timeout
+                    428, // Connection closed
+                    440, // Replaced
+                    500, // Server error
+                    503  // Service unavailable
+                ].includes(statusCode) || statusCode < 500;
+
+                if (shouldReconnect && statusCode !== 401) {
+                    const waitTime = statusCode === 408 ? 10000 : 5000;
+                    console.log(`[BOT] 🔄 Reconnecting ${phoneNumber} in ${waitTime}ms...`);
+                    await delay(waitTime);
+                    await connect().catch(e => console.error('[BOT] Reconnect err:', e.message));
                 } else {
-                    console.log(`[BOT] 🚫 ${phoneNumber} logged out permanently`);
+                    console.log(`[BOT] 🚫 Not reconnecting. Code: ${statusCode}`);
                     connections.delete(phoneNumber);
                 }
             }
         });
 
-        udmodzConnect.ev.on('creds.update', () => {
+        // ============================================
+        // CREDS UPDATE - SAVE TO PASTEBIN
+        // ============================================
+        sock.ev.on('creds.update', async () => {
             creds = state.creds;
-            scheduleSave();
+            if (isConnected) {
+                scheduleSave();
+            }
         });
 
-        return udmodzConnect;
+        return sock;
     }
 
     return await connect();
@@ -559,48 +621,74 @@ SESSION_ID=${currentPasteId}
 // ROUTES
 // ============================================
 
-// Serve index.html
 udmodzportal.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // ============================================
-// PAIR ROUTE
+// PAIR ROUTE - Fixed 401 issue
 // ============================================
 udmodzportal.get('/pair', async (req, res) => {
     const number = req.query.number?.replace(/[^0-9]/g, '');
     if (!number) return res.status(400).json({ error: 'Phone number required' });
 
+    // Check if already connected
+    const existing = connections.get(number);
+    if (existing?.status === 'open') {
+        const pasteId = getSessionPasteId(`session_${number}`);
+        return res.json({
+            status: 'already_authenticated',
+            message: 'Bot already connected!',
+            sessionId: pasteId || null,
+            rawUrl: pasteId ? `https://pastebin.com/raw/${pasteId}` : null
+        });
+    }
+
     try {
-        const udmodzConnect = await connectUDmodzBot(number);
-        await delay(5000);
+        // Connect as NEW pairing (don't load old session)
+        const sock = await connectUDmodzBot(number, true);
 
-        if (!udmodzConnect.authState.creds.registered) {
-            const code = await udmodzConnect.requestPairingCode(number);
-            const formattedCode = code?.match(/.{1,4}/g)?.join('-') || code;
+        // Store pending pairing info
+        pendingPairings.set(number, { sock, pasteId: null, rawUrl: null });
 
-            res.json({
-                status: 'success',
-                code: formattedCode,
-                message: 'Enter this code in WhatsApp → Linked Devices → Link a Device. Session ID will be sent to your WhatsApp after pairing!'
-            });
-        } else {
+        // Wait for socket to be ready
+        await delay(3000);
+
+        // Check if already registered
+        if (sock.authState.creds.registered) {
+            pendingPairings.delete(number);
             const pasteId = getSessionPasteId(`session_${number}`);
-            res.json({
+            return res.json({
                 status: 'already_authenticated',
-                message: 'Bot already paired!',
-                sessionId: pasteId || 'Check your WhatsApp',
-                rawUrl: pasteId ? `https://pastebin.com/raw/${pasteId}` : null
+                message: 'Already paired!',
+                sessionId: pasteId || null
             });
         }
+
+        // Request pairing code
+        console.log(`[PAIR] Requesting pairing code for ${number}`);
+        const code = await sock.requestPairingCode(number);
+        const formattedCode = code?.match(/.{1,4}/g)?.join('-') || code;
+
+        console.log(`[PAIR] ✅ Code for ${number}: ${formattedCode}`);
+
+        res.json({
+            status: 'success',
+            code: formattedCode,
+            message: 'Enter code in WhatsApp > Linked Devices > Link a Device. Session ID will be sent to your WhatsApp!'
+        });
+
     } catch (err) {
         console.error('[PAIR ERR]', err.message);
+        // Cleanup on error
+        connections.delete(number);
+        pendingPairings.delete(number);
         res.status(500).json({ error: err.message });
     }
 });
 
 // ============================================
-// GET SESSION ROUTE
+// SESSION ROUTE
 // ============================================
 udmodzportal.get('/session', async (req, res) => {
     const number = req.query.number?.replace(/[^0-9]/g, '');
@@ -618,46 +706,10 @@ udmodzportal.get('/session', async (req, res) => {
         });
     } else {
         res.status(404).json({
-            error: 'Session not found. Please pair your bot first.',
-            number
+            error: 'Session not found. Pair your bot first.',
+            hint: 'Go to /pair endpoint'
         });
     }
-});
-
-// ============================================
-// MANAGE ROUTE (DELETE)
-// ============================================
-udmodzportal.get('/manage', async (req, res) => {
-    const { number, action } = req.query;
-    const cleanNumber = number?.replace(/[^0-9]/g, '');
-    if (!cleanNumber) return res.status(400).json({ error: 'Number required' });
-
-    if (action === 'delete') {
-        // Disconnect bot
-        const bot = connections.get(cleanNumber);
-        if (bot) {
-            try {
-                bot.udmodzConnect.logout();
-            } catch (e) {}
-            connections.delete(cleanNumber);
-        }
-
-        // Delete from pastebin
-        const pasteId = getSessionPasteId(`session_${cleanNumber}`);
-        if (pasteId) {
-            await deleteFromPastebin(pasteId);
-        }
-
-        // Remove from local map
-        removeSessionPasteId(`session_${cleanNumber}`);
-
-        return res.json({
-            status: 'success',
-            message: `Bot ${cleanNumber} deleted successfully.`
-        });
-    }
-
-    res.status(400).json({ error: 'Invalid action. Use: delete' });
 });
 
 // ============================================
@@ -666,56 +718,77 @@ udmodzportal.get('/manage', async (req, res) => {
 udmodzportal.get('/send', async (req, res) => {
     const { text, msg, botNumber, receiver } = req.query;
     const messageContent = text || msg;
-    const cleanedbotud = botNumber?.replace(/[^0-9]/g, '');
-    const cleanedreciud = receiver?.replace(/[^0-9]/g, '');
+    const cleanBot = botNumber?.replace(/[^0-9]/g, '');
+    const cleanReceiver = receiver?.replace(/[^0-9]/g, '');
 
-    if (!messageContent || !cleanedbotud || !cleanedreciud) {
-        return res.status(400).json({
-            error: 'Required: text/msg, botNumber, receiver'
-        });
+    if (!messageContent || !cleanBot || !cleanReceiver) {
+        return res.status(400).json({ error: 'Required: text/msg, botNumber, receiver' });
     }
 
-    const receiverJid = cleanedreciud + '@s.whatsapp.net';
-    let bot = connections.get(cleanedbotud);
+    const receiverJid = cleanReceiver + '@s.whatsapp.net';
+    let bot = connections.get(cleanBot);
 
-    // Try to reconnect if offline
     if (!bot || bot.status !== 'open') {
-        const pasteId = getSessionPasteId(`session_${cleanedbotud}`);
+        const pasteId = getSessionPasteId(`session_${cleanBot}`);
         if (pasteId) {
-            console.log(`[SEND] Reconnecting ${cleanedbotud}...`);
-            if (bot?.udmodzConnect) {
-                try { bot.udmodzConnect.end(undefined); } catch (e) {}
-            }
-            await connectUDmodzBot(cleanedbotud).catch(() => {});
-
-            let attempts = 0;
-            while (attempts < 15) {
-                bot = connections.get(cleanedbotud);
-                if (bot?.status === 'open') break;
-                await delay(2000);
-                attempts++;
+            console.log(`[SEND] Reconnecting ${cleanBot}...`);
+            try {
+                await connectUDmodzBot(cleanBot, false);
+                let attempts = 0;
+                while (attempts < 15) {
+                    bot = connections.get(cleanBot);
+                    if (bot?.status === 'open') break;
+                    await delay(2000);
+                    attempts++;
+                }
+            } catch (e) {
+                return res.status(500).json({ error: 'Reconnect failed: ' + e.message });
             }
         }
     }
 
-    if (bot && (bot.status === 'open' || bot.status === 'connected')) {
+    if (bot?.status === 'open') {
         try {
-            await bot.udmodzConnect.sendMessage(receiverJid, { text: messageContent });
-            res.json({ status: 'success', message: 'Message sent successfully!' });
+            await bot.sock.sendMessage(receiverJid, { text: messageContent });
+            res.json({ status: 'success', message: 'Message sent!' });
         } catch (err) {
             res.status(500).json({ error: 'Send failed: ' + err.message });
         }
     } else {
-        res.status(404).json({
-            error: 'Bot is offline. Please pair first or wait for reconnection.'
-        });
+        res.status(404).json({ error: 'Bot offline. Pair first.' });
     }
 });
 
 // ============================================
-// HEALTH CHECK ROUTE
+// MANAGE ROUTE
 // ============================================
-udmodzportal.get('/health', async (req, res) => {
+udmodzportal.get('/manage', async (req, res) => {
+    const { number, action } = req.query;
+    const cleanNumber = number?.replace(/[^0-9]/g, '');
+    if (!cleanNumber) return res.status(400).json({ error: 'Number required' });
+
+    if (action === 'delete') {
+        const bot = connections.get(cleanNumber);
+        if (bot) {
+            try { bot.sock.logout(); } catch (e) {}
+            connections.delete(cleanNumber);
+        }
+
+        const pasteId = getSessionPasteId(`session_${cleanNumber}`);
+        if (pasteId) deleteFromPastebin(pasteId).catch(() => {});
+        removeSessionPasteId(`session_${cleanNumber}`);
+        pendingPairings.delete(cleanNumber);
+
+        return res.json({ status: 'success', message: `Bot ${cleanNumber} deleted.` });
+    }
+
+    res.status(400).json({ error: 'Invalid action' });
+});
+
+// ============================================
+// HEALTH ROUTE
+// ============================================
+udmodzportal.get('/health', (req, res) => {
     const list = [];
 
     connections.forEach((val, key) => {
@@ -724,108 +797,112 @@ udmodzportal.get('/health', async (req, res) => {
             number: key,
             status: val.status,
             lastUpdate: new Date(val.lastUpdate).toISOString(),
-            sessionId: pasteId || 'N/A',
+            sessionId: pasteId || null,
             rawUrl: pasteId ? `https://pastebin.com/raw/${pasteId}` : null,
             pasteUrl: pasteId ? `https://pastebin.com/${pasteId}` : null
         });
     });
 
-    // Add offline bots from session map
-    const sessionMap = loadSessionMap();
-    for (const [sId, pId] of Object.entries(sessionMap)) {
-        const num = sId.replace('session_', '');
+    // Add offline from memory map
+    inMemorySessionMap.forEach((pasteId, sessionId) => {
+        const num = sessionId.replace('session_', '');
         if (!connections.has(num)) {
             list.push({
                 number: num,
                 status: 'offline',
-                lastUpdate: 'N/A',
-                sessionId: pId,
-                rawUrl: `https://pastebin.com/raw/${pId}`,
-                pasteUrl: `https://pastebin.com/${pId}`
+                lastUpdate: null,
+                sessionId: pasteId,
+                rawUrl: `https://pastebin.com/raw/${pasteId}`,
+                pasteUrl: `https://pastebin.com/${pasteId}`
             });
         }
-    }
+    });
 
     res.json({
         status: 'ok',
         total: list.length,
         online: list.filter(b => b.status === 'open').length,
-        offline: list.filter(b => b.status === 'offline').length,
+        offline: list.filter(b => b.status !== 'open').length,
         bots: list
     });
 });
 
 // ============================================
-// INIT - Load existing sessions on startup
+// STATUS ROUTE - Quick check
+// ============================================
+udmodzportal.get('/status', (req, res) => {
+    res.json({
+        status: 'running',
+        uptime: process.uptime(),
+        memory: process.memoryUsage(),
+        sessions: inMemorySessionMap.size,
+        connections: connections.size
+    });
+});
+
+// ============================================
+// INIT
 // ============================================
 async function init() {
-    console.log('[INIT] 🚀 Starting UDMODZ API...');
-    console.log('[INIT] 🔑 Pastebin API Key:', PASTEBIN_API_KEY ? '✅ Set' : '❌ Missing');
+    console.log('[INIT] 🚀 UDMODZ API Starting...');
+    console.log('[INIT] 🔑 API Key:', PASTEBIN_API_KEY ? '✅' : '❌');
 
-    // Get user key on startup
     if (PASTEBIN_USERNAME && PASTEBIN_PASSWORD) {
-        await getPastebinUserKey();
+        await getPastebinUserKey().catch(() => {});
     }
 
-    const sessionMap = loadSessionMap();
-    const sessions = Object.entries(sessionMap);
+    // Load session map into memory
+    loadSessionMap();
 
-    if (sessions.length === 0) {
-        console.log('[INIT] No existing sessions found');
-        return;
-    }
-
-    console.log(`[INIT] Found ${sessions.length} session(s), reconnecting...`);
+    const sessions = [...inMemorySessionMap.entries()];
+    console.log(`[INIT] Found ${sessions.length} saved session(s)`);
 
     for (const [sessionId, pasteId] of sessions) {
         const num = sessionId.replace('session_', '');
-        console.log(`[INIT] 🔄 Connecting: ${num} (Paste: ${pasteId})`);
+        console.log(`[INIT] 🔄 Reconnecting: ${num}`);
         try {
-            await connectUDmodzBot(num);
+            await connectUDmodzBot(num, false);
             await delay(3000);
         } catch (e) {
             console.error(`[INIT ERR] ${num}:`, e.message);
         }
     }
 
-    console.log('[INIT] ✅ All sessions loaded!');
+    console.log('[INIT] ✅ Ready!');
 }
 
 // ============================================
 // START SERVER
 // ============================================
-const isProduction = process.env.NODE_ENV === 'production' ||
+const isProduction = !!(
+    process.env.NODE_ENV === 'production' ||
     process.env.VERCEL ||
-    process.env.CLEVER_CLOUD ||
-    process.env.RAILWAY_ENVIRONMENT;
+    process.env.RAILWAY_ENVIRONMENT ||
+    process.env.RENDER ||
+    process.env.HEROKU_APP_NAME
+);
 
 if (isProduction) {
     udmodzportal.listen(port, async () => {
-        console.log(`[SERVER] ✅ Running on port ${port}`);
+        console.log(`[SERVER] ✅ Port: ${port}`);
         await init();
     });
 } else {
     try {
         const https = require('https');
         const selfsigned = require('selfsigned');
-        const attrs = [{ name: 'commonName', value: 'localhost' }];
-        const pems = selfsigned.generate(attrs, { days: 365 });
-
-        const httpsServer = https.createServer({
-            key: pems.private,
-            cert: pems.cert
-        }, udmodzportal);
-
-        httpsServer.listen(port, async () => {
-            console.log(`[SERVER] ✅ HTTPS Running on port ${port}`);
-            console.log(`[SERVER] 🌐 URL: https://localhost:${port}`);
-            await init();
-        });
+        const pems = selfsigned.generate(
+            [{ name: 'commonName', value: 'localhost' }],
+            { days: 365 }
+        );
+        https.createServer({ key: pems.private, cert: pems.cert }, udmodzportal)
+            .listen(port, async () => {
+                console.log(`[SERVER] ✅ HTTPS: https://localhost:${port}`);
+                await init();
+            });
     } catch (e) {
-        // Fallback to HTTP if selfsigned not available
         udmodzportal.listen(port, async () => {
-            console.log(`[SERVER] ✅ HTTP Running on port ${port}`);
-            console.log(`[SERVER] 🌐 URL: http://localhost:${port}`);
+            console.log(`[SERVER] ✅ HTTP: http://localhost:${port}`);
             await init();
         });
     }
